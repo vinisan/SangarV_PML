@@ -1,0 +1,147 @@
+---
+Title: "SangarCoursera_PML"
+output: html_document
+---
+This is the course project for Coursera Practical Machine Learning class submitted by Vineet Sangar. 
+Project involved classifying the person into one of the five classes (A-E) depending upon how the 
+exercises were performed by the person. 
+
+Loading the packages for the project
+```{r}
+library(caret)
+
+library(randomForest)
+library(dplyr)
+```
+Preparing the data: reading and parsing the dataset to understand the rows and columns. After reading the discussion on the project Forum removed the first 7 columns from the datasets which included the row indices , timestamps and time windows
+-------------------------------------------------------------------------------------------------
+```{r}
+rawTrain<-read.csv("pml-training.csv")
+colnames(rawTrain)
+head(rawTrain)
+dim(rawTrain)
+rawTrain<-rawTrain[,8:160]
+
+```
+
+Data cleaning:  removing the predictors which had empty or 'na' as values or had near zero variance. The removed variables most probably do not add much or anything to the model. However they might increase the computing time
+------------------------------------------------------------------------------------------
+```{r}
+check<-which(colSums(is.na(rawTrain)) == 0)
+checkTrain<-rawTrain[,check]
+dim(checkTrain)
+colnames(checkTrain)
+varCheck<-nearZeroVar(checkTrain)
+checkTrain<-checkTrain[,-varCheck]
+dim(checkTrain)
+
+```
+
+Data partition: creating partitions of the data into training and test dataset. This was done to check the performance of my model. Motivation was to remove the overfit. 
+-------------------------------------------------------------------------------------
+```{r}
+set.seed(2334)
+inTrain<-createDataPartition(y = checkTrain$classe, p = 0.7, list = FALSE)
+workingTrain<-checkTrain[inTrain,]
+workingTest<-checkTrain[-inTrain,]
+dim(workingTrain)
+dim(workingTest)
+```
+
+Training the model: trained the model using randomforest algorithm. I used this algorithm because it is the best performing algorithm. I checked for the oob and the class recall from the trained model. Using this dataset the oob was 0.79% and class recall was ~100% for class A, B and E.
+Here is the summary of the training model with:
+ Type of random forest: classification
+                     Number of trees: 50
+No. of variables tried at each split: 7
+
+        OOB estimate of  error rate: 0.79%
+
+---------------------------------------------------------------------------------------------
+```{r}
+set.seed(2334)
+modFitb <- randomForest(classe ~ ., workingTrain, ntree=50, norm.votes=FALSE)
+modFitb
+```
+
+Testing on the model on the test dataset: ran the model with test dataset to check for the prediction and errors in classification. Classes E was predicted the best, classes C and D were predicted with highest misclassification. Average accuracy was 99.34%. Satisified with the model.
+
+Overall Statistics
+                                         
+               Accuracy : 0.9934         
+                 95% CI : (0.991, 0.9953)
+    No Information Rate : 0.2845         
+    P-Value [Acc > NIR] : < 2.2e-16     
+---------------------------------------------------------------------------------------------
+```{r}
+set.seed(2334)
+testResult<-predict(modFitb, newdata = workingTest)
+summary(testResult)
+confusionMatrix(data = testResult, reference = workingTest$classe)
+```
+
+Selecting the predictors: selected the important predictors using the mean decrease gini values. Made the plots to identify the variables and decreasing Gini relationship. Used MeanDecreseGini > 200 as a cutoff to select the important predictors (18 predictors). Objective was to make the algorithm fast while not losing the accuracy.
+---------------------------------------------------------------------------------------------
+```{r}
+predImportance <- as.data.frame(importance(modFitb))
+predImportance %>%
+  ggplot(aes(x = MeanDecreaseGini)) +
+  geom_density(fill = "lightblue") +
+  geom_vline(xintercept = 200, colour = "red", size = 0.5,
+             linetype = "dotted") +
+  ylab("Variables")
+
+importantPreds <- row.names(predImportance)[predImportance$MeanDecreaseGini > 200]
+```
+
+Cross validation: I used 10 fold cross validation for calculating the out of sample error. 
+histogram of the fold models and the accuracy of the mean (97%) was a bit lower than the model which uses all the predictors (99%). 
+---------------------------------------------------------------------------------------------
+```{r}
+nFolds <- 10
+dataFolds <- createFolds(workingTest$classe, k = nFolds)
+foldAccuracy <- rep(0, nFolds)
+
+for (fold in 1:nFolds) {
+  foldTrain <- workingTest[-dataFolds[[fold]],
+                       names(workingTest) %in%
+                         c(importantPreds, "classe")]
+  foldTest <- workingTest[dataFolds[[fold]], ]
+  
+  foldTrainMod <- randomForest(classe ~., data = foldTrain)
+  foldTestPred <- predict(foldTrainMod, newdata = foldTest)
+  
+  foldAccuracy[fold] <- confusionMatrix(data = foldTestPred,
+                                   reference = foldTest$classe)$overall[1]
+}
+hist(foldAccuracy, xlab = "Fold Accuracy", ylab = "Frequency of folds", col = "lightblue")
+mean(foldAccuracy)
+
+````
+Final model: Using selected 18 predictors, trained the model again using all values (~19,000) for 
+the predictors. This model was tested in the final test set.
+Summary of the model:
+Number of trees: 500
+No. of variables tried at each split: 4
+
+        OOB estimate of  error rate: 0.63% 
+---------------------------------------------------------------------------------------------
+```{r}
+set.seed(2334)
+finalTrain <- checkTrain[, names(checkTrain) %in%  c(importantPreds, "classe")]
+finalModFit<-randomForest(classe ~ ., data = finalTrain)
+finalModFit
+
+```
+Test set run:Running the test set to get predictions for the pml-test.csv and the model predicted all the classes correctly. 
+---------------------------------------------------------------------------------------------
+```{r}
+set.seed(2334)
+realTest<-read.csv("pml-testing.csv")
+testPred<-predict(finalModFit, realTest)
+testPred
+```
+
+
+
+
+
